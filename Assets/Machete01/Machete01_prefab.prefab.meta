@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 0d72c17103b886f4ebd560637450ecc3
+timeCreated: 1479276313
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 76191
+  packageName: Machete01
+  packageVersion: 1.0
+  assetPath: Assets/Machete01/Machete01_prefab.prefab
+  uploadId: 146616
