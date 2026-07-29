@@ -40,6 +40,23 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float tempoAtaqueLeve = 0.8f;
     [SerializeField] private float tempoAtaquePesado = 1.5f;
 
+    [Header("Hitbox, Dano e Impacto Visual")]
+    [SerializeField] private Transform pontoDeAtaque;
+    [SerializeField] private float raioDoAtaque = 1.2f;
+    [Tooltip("Coloque aqui a Layer onde os zumbis estão")]
+    [SerializeField] private LayerMask layerInimigos;
+
+    [SerializeField] private int danoAtaqueLeve = 25;
+    [SerializeField] private int danoAtaquePesado = 50;
+
+    [Tooltip("Momento exato (em % do tempo total) em que a machete acerta o inimigo")]
+    [Range(0.1f, 0.9f)][SerializeField] private float porcentagemHitLeve = 0.4f;
+    [Range(0.1f, 0.9f)][SerializeField] private float porcentagemHitPesado = 0.5f;
+
+    [SerializeField] private float forcaCameraShake = 0.3f;
+    [SerializeField] private float tempoCameraShake = 0.15f;
+    private Vector3 cameraShakeOffset = Vector3.zero;
+
     private bool isArmed = false;
     private bool isAttacking = false;
     private bool isEquipping = false;
@@ -103,7 +120,6 @@ public class PlayerController : MonoBehaviour
     private bool mudandoPostura = false;
     private float tempoBloqueioQueda = 0f;
 
-    // Variável para calcular a calçada
     private float tempoNoAr = 0f;
     #endregion
 
@@ -207,18 +223,74 @@ public class PlayerController : MonoBehaviour
         {
             if (anim != null) { anim.SetInteger(hashLightAttackIndex, lightComboIndex); anim.SetTrigger(hashLightAttack); }
             lightComboIndex++;
-            if (lightComboIndex > 2) lightComboIndex = 0;
-            yield return new WaitForSeconds(tempoAtaqueLeve);
+
+            if (lightComboIndex > 1) lightComboIndex = 0;
+
+            yield return new WaitForSeconds(tempoAtaqueLeve * porcentagemHitLeve);
+            CausarDanoNoInimigo(danoAtaqueLeve);
+            yield return new WaitForSeconds(tempoAtaqueLeve * (1f - porcentagemHitLeve));
         }
         else
         {
             if (anim != null) { anim.SetInteger(hashHeavyAttackIndex, heavyComboIndex); anim.SetTrigger(hashHeavyAttack); }
             heavyComboIndex++;
             if (heavyComboIndex > 1) heavyComboIndex = 0;
-            yield return new WaitForSeconds(tempoAtaquePesado);
+
+            yield return new WaitForSeconds(tempoAtaquePesado * porcentagemHitPesado);
+            CausarDanoNoInimigo(danoAtaquePesado);
+            yield return new WaitForSeconds(tempoAtaquePesado * (1f - porcentagemHitPesado));
         }
 
         isAttacking = false;
+    }
+
+    private void CausarDanoNoInimigo(int dano)
+    {
+        if (pontoDeAtaque == null) return;
+        Collider[] inimigosAcertados = Physics.OverlapSphere(pontoDeAtaque.position, raioDoAtaque, layerInimigos);
+
+        bool acertouAlguem = false;
+
+        foreach (Collider inimigo in inimigosAcertados)
+        {
+            ZumbiIA zumbi = inimigo.GetComponent<ZumbiIA>();
+            if (zumbi != null)
+            {
+                zumbi.ReceberDano(dano, transform.position);
+                acertouAlguem = true;
+            }
+        }
+
+        if (acertouAlguem)
+        {
+            StartCoroutine(HitStop());
+            StartCoroutine(CameraShake());
+        }
+    }
+
+    private IEnumerator HitStop()
+    {
+        Time.timeScale = 0.1f;
+        yield return new WaitForSecondsRealtime(0.04f);
+        Time.timeScale = 1f;
+    }
+
+    private IEnumerator CameraShake()
+    {
+        float tempoDecorrido = 0f;
+
+        while (tempoDecorrido < tempoCameraShake)
+        {
+            float x = Random.Range(-1f, 1f) * forcaCameraShake;
+            float z = Random.Range(-1f, 1f) * forcaCameraShake;
+
+            cameraShakeOffset = new Vector3(x, 0, z);
+
+            tempoDecorrido += Time.unscaledDeltaTime;
+            yield return null;
+        }
+
+        cameraShakeOffset = Vector3.zero;
     }
 
     private bool isGrounded()
@@ -267,6 +339,34 @@ public class PlayerController : MonoBehaviour
         if (querCorrer && !estaDeslizando) { isCrouching = false; isProne = false; }
     }
 
+    private void CalcularMovimentoFisico()
+    {
+        if (estaEsquivando) return;
+
+        // 🚨 O Freio de Mão Absoluto durante os golpes
+        if (isAttacking || isEquipping)
+        {
+            currentSpeed = 0f;
+            smoothedMoveInput = Vector3.zero;
+            return;
+        }
+
+        Vector3 targetMoveInput = moveInput.normalized;
+        float taxaFrenagemAtual = frenagemCaminhada;
+        if (targetMoveInput.magnitude == 0 && currentSpeed > walkSpeed + 0.5f) taxaFrenagemAtual = frenagemCorrida;
+
+        smoothedMoveInput = Vector3.MoveTowards(smoothedMoveInput, targetMoveInput, taxaFrenagemAtual * Time.deltaTime);
+
+        float targetSpeed = walkSpeed;
+        if (isProne) targetSpeed = proneSpeed;
+        else if (isCrouching) targetSpeed = crouchSpeed;
+        else if (querCorrer) targetSpeed = sprintSpeed;
+
+        currentSpeed = Mathf.MoveTowards(currentSpeed, targetSpeed, aceleracaoCorrida * Time.deltaTime);
+
+        if (mudandoPostura) currentSpeed = Mathf.MoveTowards(currentSpeed, proneSpeed, 30f * Time.deltaTime);
+    }
+
     private IEnumerator ExecutarRolamento()
     {
         estaEsquivando = true;
@@ -304,33 +404,6 @@ public class PlayerController : MonoBehaviour
 
         currentSpeed = querCorrer ? sprintSpeed : walkSpeed;
         estaEsquivando = false;
-    }
-
-    private void CalcularMovimentoFisico()
-    {
-        if (estaEsquivando) return;
-
-        if (isAttacking || isEquipping)
-        {
-            currentSpeed = Mathf.MoveTowards(currentSpeed, 0f, 20f * Time.deltaTime);
-            smoothedMoveInput = Vector3.zero;
-            return;
-        }
-
-        Vector3 targetMoveInput = moveInput.normalized;
-        float taxaFrenagemAtual = frenagemCaminhada;
-        if (targetMoveInput.magnitude == 0 && currentSpeed > walkSpeed + 0.5f) taxaFrenagemAtual = frenagemCorrida;
-
-        smoothedMoveInput = Vector3.MoveTowards(smoothedMoveInput, targetMoveInput, taxaFrenagemAtual * Time.deltaTime);
-
-        float targetSpeed = walkSpeed;
-        if (isProne) targetSpeed = proneSpeed;
-        else if (isCrouching) targetSpeed = crouchSpeed;
-        else if (querCorrer) targetSpeed = sprintSpeed;
-
-        currentSpeed = Mathf.MoveTowards(currentSpeed, targetSpeed, aceleracaoCorrida * Time.deltaTime);
-
-        if (mudandoPostura) currentSpeed = Mathf.MoveTowards(currentSpeed, proneSpeed, 30f * Time.deltaTime);
     }
 
     private void CalcularRotacaoMouse(bool forcarGiro = false)
@@ -371,7 +444,6 @@ public class PlayerController : MonoBehaviour
         anim.SetBool(hashIsSprinting, visualCorrida);
         anim.SetBool(hashIsArmed, isArmed);
 
-        // 🚨 A MÁGICA DA CALÇADA: Cronômetro de tempo no ar
         if (!isGrounded())
         {
             tempoNoAr += Time.deltaTime;
@@ -383,7 +455,6 @@ public class PlayerController : MonoBehaviour
 
         bool deveCair = (tempoNoAr > 0.30f) && !isProne && !estaEsquivando && !mudandoPostura && Time.time > tempoBloqueioQueda;
         anim.SetBool(hashIsFalling, deveCair);
-        // ----------------------------------------------------
 
         Vector3 localMove = transform.InverseTransformDirection(smoothedMoveInput);
         float alvoMultiplicador = visualCorrida ? 2f : 1f;
@@ -439,8 +510,11 @@ public class PlayerController : MonoBehaviour
     private void AplicarZoomECameraFollow()
     {
         distanciaAtual = Mathf.Lerp(distanciaAtual, distanciaAlvo, suavidadeZoom * Time.deltaTime);
-        Vector3 novaPosicaoCamera = transform.position + (direcaoOriginalDaCamera * distanciaAtual);
+
+        Vector3 novaPosicaoCamera = transform.position + (direcaoOriginalDaCamera * distanciaAtual) + cameraShakeOffset;
+
         playerCamera.transform.position = novaPosicaoCamera;
+
         playerCamera.transform.LookAt(transform.position + Vector3.up * (alturaEmPe / 2f));
     }
 
@@ -459,6 +533,14 @@ public class PlayerController : MonoBehaviour
         Vector3 novoCentro = capsuleCollider.center;
         novoCentro.y = centroYOriginal - (diferencaAltura / 2f);
         capsuleCollider.center = novoCentro;
+    }
+
+    void OnDrawGizmosSelected()
+    {
+        if (pontoDeAtaque == null) return;
+
+        Gizmos.color = Color.red;
+        Gizmos.DrawWireSphere(pontoDeAtaque.position, raioDoAtaque);
     }
     #endregion
 }
