@@ -16,7 +16,7 @@ public class PlayerController : MonoBehaviour
     #endregion
 
     #region Configurações de Física
-    [Header("Camadas de Apoio")]
+    [Header("Camadas de Apoio e Obstáculos")]
     [SerializeField] private LayerMask layerChao;
     [SerializeField] private LayerMask layerObstaculo;
     #endregion
@@ -29,37 +29,50 @@ public class PlayerController : MonoBehaviour
     private float tempoProximaEsquiva = 0f;
     #endregion
 
-    #region Sistema de Combate (Melee)
-    [Header("Configurações de Combate")]
-    [SerializeField] private GameObject armaNaMao;
-    [SerializeField] private GameObject armaNasCostas;
+    #region Sistema de Combate e Armas
+    [Header("Gerenciador de Armas")]
+    [Tooltip("0 = Desarmado | 1 = Machete | 2 = Pistola")]
+    public int armaAtual = 0;
+    private bool isArmed = false;
+    private bool isAttacking = false;
+    private bool isEquipping = false;
+    private bool isAiming = false;
 
-    [Space]
-    [SerializeField] private float tempoEquipar = 1.2f;
-    [SerializeField] private float momentoDePegarArma = 0.5f;
-    [SerializeField] private float tempoAtaqueLeve = 0.8f;
-    [SerializeField] private float tempoAtaquePesado = 1.5f;
-
-    [Header("Hitbox, Dano e Impacto Visual")]
-    [SerializeField] private Transform pontoDeAtaque;
+    [Header("Slots: Machete")]
+    [SerializeField] private GameObject macheteNaMao;
+    [SerializeField] private GameObject macheteNasCostas;
+    [SerializeField] private Transform pontoDeAtaqueMelee;
     [SerializeField] private float raioDoAtaque = 1.2f;
-    [Tooltip("Coloque aqui a Layer onde os zumbis estão")]
-    [SerializeField] private LayerMask layerInimigos;
-
     [SerializeField] private int danoAtaqueLeve = 25;
     [SerializeField] private int danoAtaquePesado = 50;
-
-    [Tooltip("Momento exato (em % do tempo total) em que a machete acerta o inimigo")]
+    [SerializeField] private float tempoAtaqueLeve = 0.8f;
+    [SerializeField] private float tempoAtaquePesado = 1.5f;
     [Range(0.1f, 0.9f)][SerializeField] private float porcentagemHitLeve = 0.4f;
     [Range(0.1f, 0.9f)][SerializeField] private float porcentagemHitPesado = 0.5f;
 
+    [Header("Slots: Pistola")]
+    [SerializeField] private GameObject pistolaNaMao;
+    [SerializeField] private GameObject pistolaNoColdre;
+    [SerializeField] private Transform pontoDeDisparo;
+    [SerializeField] private LineRenderer miraLaser;
+    [SerializeField] private int danoPistola = 25;
+    [SerializeField] private float tempoEntreTiros = 0.3f;
+    [SerializeField] private float alcanceTiro = 50f;
+    [SerializeField] private ParticleSystem efeitoFogoPistola;
+
+    [Header("Efeitos Visuais (VFX)")]
+    [SerializeField] private GameObject efeitoSanguePrefab; // Prefab do sangue
+
+    [Header("Configurações Gerais de Combate")]
+    [SerializeField] private LayerMask layerInimigos;
+    [SerializeField] private float tempoEquipar = 1.2f;
+    [SerializeField] private float momentoDePegarArma = 0.5f;
+
+    [Header("Efeitos de Impacto (Camera Shake)")]
     [SerializeField] private float forcaCameraShake = 0.3f;
     [SerializeField] private float tempoCameraShake = 0.15f;
     private Vector3 cameraShakeOffset = Vector3.zero;
 
-    private bool isArmed = false;
-    private bool isAttacking = false;
-    private bool isEquipping = false;
     private int lightComboIndex = 0;
     private int heavyComboIndex = 0;
     #endregion
@@ -80,15 +93,10 @@ public class PlayerController : MonoBehaviour
     #region Câmera
     [Header("Configurações da Câmera")]
     [SerializeField] private Camera playerCamera;
-
-    [Tooltip("Posição ideal da câmera. 0 no X garante que ela fique reta com o teclado.")]
     [SerializeField] private Vector3 offsetCamera = new Vector3(0f, 15f, -8f);
-
     [SerializeField] private bool usarScrollDoMouse = true;
     [SerializeField] private KeyCode botaoZoomIn = KeyCode.Equals;
     [SerializeField] private KeyCode botaoZoomOut = KeyCode.Minus;
-
-    [Space]
     [SerializeField] private float distanciaMinima = 5f;
     [SerializeField] private float distanciaMaxima = 25f;
     [SerializeField] private float sensibilidadeZoom = 5f;
@@ -99,28 +107,14 @@ public class PlayerController : MonoBehaviour
     private Rigidbody rb;
     private CapsuleCollider capsuleCollider;
     private Animator anim;
-
-    private float distanciaAlvo;
-    private float distanciaAtual;
+    private float distanciaAlvo, distanciaAtual;
     private Vector3 direcaoOriginalDaCamera;
     private Plane groundPlane;
-
-    private Vector3 moveInput;
-    private Vector3 smoothedMoveInput;
-    private float currentSpeed;
+    private Vector3 moveInput, smoothedMoveInput;
+    private float currentSpeed, valorGiro, centroYOriginal;
+    private bool isCrouching, isProne, querCorrer, visualCorrida, estaEsquivando, mudandoPostura;
+    private float tempoNoAr, tempoBloqueioQueda;
     private float currentAnimMultiplier = 1f;
-    private float valorGiro = 0f;
-    private float centroYOriginal;
-
-    private bool isCrouching = false;
-    private bool isProne = false;
-    private bool querCorrer = false;
-    private bool visualCorrida = false;
-    private bool estaEsquivando = false;
-    private bool mudandoPostura = false;
-    private float tempoBloqueioQueda = 0f;
-
-    private float tempoNoAr = 0f;
     #endregion
 
     #region Hashes do Animator
@@ -131,14 +125,17 @@ public class PlayerController : MonoBehaviour
     private static readonly int hashVelocityX = Animator.StringToHash("VelocityX");
     private static readonly int hashVelocityZ = Animator.StringToHash("VelocityZ");
     private static readonly int hashTurn = Animator.StringToHash("Turn");
-
     private static readonly int hashRoll = Animator.StringToHash("Roll");
+
+    private static readonly int hashTipoArma = Animator.StringToHash("TipoArma");
     private static readonly int hashEquip = Animator.StringToHash("Equip");
     private static readonly int hashLightAttack = Animator.StringToHash("LightAttack");
     private static readonly int hashHeavyAttack = Animator.StringToHash("HeavyAttack");
     private static readonly int hashLightAttackIndex = Animator.StringToHash("LightAttackIndex");
     private static readonly int hashHeavyAttackIndex = Animator.StringToHash("HeavyAttackIndex");
     private static readonly int hashIsArmed = Animator.StringToHash("IsArmed");
+    private static readonly int hashAtirar = Animator.StringToHash("Atirar");
+    private static readonly int hashIsAiming = Animator.StringToHash("IsAiming");
     #endregion
 
     void Start()
@@ -146,20 +143,25 @@ public class PlayerController : MonoBehaviour
         InicializarComponentes();
         InicializarCamera();
 
-        if (armaNaMao != null) armaNaMao.SetActive(false);
-        if (armaNasCostas != null) armaNasCostas.SetActive(true);
+        // Garante que o jogo sempre inicie desarmado
+        armaAtual = 0;
+        isArmed = false;
+        if (anim != null) anim.SetInteger(hashTipoArma, 0);
+
+        DesligarTodasAsArmas();
+
+        if (miraLaser != null) miraLaser.enabled = false;
     }
 
     void Update()
     {
+        ProcessarTrocaDeArmas();
         ProcessarInputsDeCombate();
         ProcessarInputsDeEstado();
         CalcularMovimentoFisico();
         CalcularRotacaoMouse();
         HandleZoomInput();
-
         if (ajustarColisorDinamico) RedimensionarColisorDoPlayer();
-
         AtualizarAnimator();
     }
 
@@ -167,12 +169,7 @@ public class PlayerController : MonoBehaviour
     {
         Vector3 novaVelocidade = smoothedMoveInput * currentSpeed;
         novaVelocidade.y = rb.linearVelocity.y;
-
-        if (!isGrounded())
-        {
-            novaVelocidade.y -= gravidadeExtra * Time.fixedDeltaTime;
-        }
-
+        if (!isGrounded()) novaVelocidade.y -= gravidadeExtra * Time.fixedDeltaTime;
         rb.linearVelocity = novaVelocidade;
     }
 
@@ -181,39 +178,184 @@ public class PlayerController : MonoBehaviour
         if (playerCamera != null) AplicarZoomECameraFollow();
     }
 
-    #region Lógica de Combate e Estados
-    private void ProcessarInputsDeCombate()
+    #region Gerenciador de Armas
+    private void DesligarTodasAsArmas()
+    {
+        if (macheteNaMao != null) macheteNaMao.SetActive(false);
+        if (macheteNasCostas != null) macheteNasCostas.SetActive(true);
+        if (pistolaNaMao != null) pistolaNaMao.SetActive(false);
+        if (pistolaNoColdre != null) pistolaNoColdre.SetActive(true);
+    }
+
+    private void ProcessarTrocaDeArmas()
     {
         if (estaEsquivando || isAttacking || isEquipping) return;
 
-        if (Input.GetKeyDown(KeyCode.E)) StartCoroutine(RotinaEquiparArma());
-
-        if (isArmed && isGrounded())
+        if (Input.GetKeyDown(KeyCode.Alpha1) && armaAtual != 1)
         {
-            if (Input.GetMouseButtonDown(0)) StartCoroutine(RotinaAtaque(true));
-            else if (Input.GetMouseButtonDown(1)) StartCoroutine(RotinaAtaque(false));
+            armaAtual = 1;
+            if (isArmed) StartCoroutine(RotinaTrocarArmaDireto());
+        }
+        else if (Input.GetKeyDown(KeyCode.Alpha2) && armaAtual != 2)
+        {
+            armaAtual = 2;
+            if (isArmed) StartCoroutine(RotinaTrocarArmaDireto());
+        }
+
+        if (Input.GetKeyDown(KeyCode.E))
+        {
+            StartCoroutine(RotinaEquiparArma());
         }
     }
 
-    private IEnumerator RotinaEquiparArma()
+    private IEnumerator RotinaTrocarArmaDireto()
     {
         isEquipping = true;
-        isCrouching = false;
-        isProne = false;
+        isAiming = false;
+        if (miraLaser != null) miraLaser.enabled = false;
         smoothedMoveInput = Vector3.zero;
+        DesligarTodasAsArmas();
 
+        if (anim != null) anim.SetInteger(hashTipoArma, armaAtual);
         if (anim != null) anim.SetTrigger(hashEquip);
-        yield return new WaitForSeconds(momentoDePegarArma);
-        isArmed = !isArmed;
 
-        if (armaNaMao != null) armaNaMao.SetActive(isArmed);
-        if (armaNasCostas != null) armaNasCostas.SetActive(!isArmed);
+        yield return new WaitForSeconds(momentoDePegarArma);
+
+        if (armaAtual == 1) { if (macheteNaMao != null) macheteNaMao.SetActive(true); if (macheteNasCostas != null) macheteNasCostas.SetActive(false); }
+        else if (armaAtual == 2) { if (pistolaNaMao != null) pistolaNaMao.SetActive(true); if (pistolaNoColdre != null) pistolaNoColdre.SetActive(false); }
 
         yield return new WaitForSeconds(tempoEquipar - momentoDePegarArma);
         isEquipping = false;
     }
 
-    private IEnumerator RotinaAtaque(bool isLightAttack)
+    private IEnumerator RotinaEquiparArma()
+    {
+        isEquipping = true;
+        isAiming = false;
+        if (miraLaser != null) miraLaser.enabled = false;
+        smoothedMoveInput = Vector3.zero;
+
+        if (!isArmed)
+        {
+            if (anim != null) anim.SetInteger(hashTipoArma, armaAtual);
+            if (anim != null) anim.SetTrigger(hashEquip);
+            yield return new WaitForSeconds(momentoDePegarArma);
+
+            isArmed = true;
+            if (armaAtual == 1) { macheteNaMao.SetActive(true); macheteNasCostas.SetActive(false); }
+            else if (armaAtual == 2) { pistolaNaMao.SetActive(true); pistolaNoColdre.SetActive(false); }
+        }
+        else
+        {
+            if (anim != null) anim.SetInteger(hashTipoArma, 0);
+            if (anim != null) anim.SetTrigger(hashEquip);
+            yield return new WaitForSeconds(momentoDePegarArma);
+
+            isArmed = false;
+            DesligarTodasAsArmas();
+        }
+
+        yield return new WaitForSeconds(tempoEquipar - momentoDePegarArma);
+        isEquipping = false;
+    }
+    #endregion
+
+    #region Lógica de Combate e Mira Laser
+    private void ProcessarInputsDeCombate()
+    {
+        if (estaEsquivando || isEquipping || !isArmed || !isGrounded())
+        {
+            isAiming = false;
+            if (miraLaser != null) miraLaser.enabled = false;
+            return;
+        }
+
+        if (armaAtual == 2)
+        {
+            if (Input.GetMouseButton(1) && !isAttacking)
+            {
+                isAiming = true;
+                AtualizarMiraLaser();
+                CalcularRotacaoMouse(true);
+            }
+            else
+            {
+                isAiming = false;
+                if (miraLaser != null) miraLaser.enabled = false;
+            }
+
+            if (Input.GetMouseButtonDown(0) && !isAttacking)
+            {
+                StartCoroutine(RotinaAtirarPistola());
+            }
+        }
+        else if (armaAtual == 1)
+        {
+            isAiming = false;
+            if (miraLaser != null) miraLaser.enabled = false;
+
+            if (!isAttacking)
+            {
+                if (Input.GetMouseButtonDown(0)) StartCoroutine(RotinaAtaqueMelee(true));
+                else if (Input.GetMouseButtonDown(1)) StartCoroutine(RotinaAtaqueMelee(false));
+            }
+        }
+    }
+
+    private void AtualizarMiraLaser()
+    {
+        if (miraLaser == null || pontoDeDisparo == null) return;
+
+        miraLaser.enabled = true;
+        miraLaser.SetPosition(0, pontoDeDisparo.position);
+
+        LayerMask mascaraLaser = layerInimigos | layerObstaculo | layerChao;
+
+        if (Physics.Raycast(pontoDeDisparo.position, pontoDeDisparo.forward, out RaycastHit hit, alcanceTiro, mascaraLaser))
+        {
+            miraLaser.SetPosition(1, hit.point);
+        }
+        else
+        {
+            miraLaser.SetPosition(1, pontoDeDisparo.position + pontoDeDisparo.forward * alcanceTiro);
+        }
+    }
+
+    private IEnumerator RotinaAtirarPistola()
+    {
+        isAttacking = true;
+        smoothedMoveInput = Vector3.zero;
+        CalcularRotacaoMouse(true);
+
+        if (anim != null) anim.SetTrigger(hashAtirar);
+        if (efeitoFogoPistola != null) efeitoFogoPistola.Play();
+
+        if (pontoDeDisparo != null)
+        {
+            LayerMask mascaraTiro = layerInimigos | layerObstaculo;
+            if (Physics.Raycast(pontoDeDisparo.position, pontoDeDisparo.forward, out RaycastHit hit, alcanceTiro, mascaraTiro))
+            {
+                ZumbiIA zumbi = hit.collider.GetComponent<ZumbiIA>();
+                if (zumbi != null)
+                {
+                    zumbi.ReceberDano(danoPistola, transform.position);
+                    StartCoroutine(HitStop());
+
+                    if (efeitoSanguePrefab != null)
+                    {
+                        Instantiate(efeitoSanguePrefab, hit.point, Quaternion.LookRotation(hit.normal));
+                    }
+                }
+            }
+        }
+
+        StartCoroutine(CameraShake());
+
+        yield return new WaitForSeconds(tempoEntreTiros);
+        isAttacking = false;
+    }
+
+    private IEnumerator RotinaAtaqueMelee(bool isLightAttack)
     {
         isAttacking = true;
         smoothedMoveInput = Vector3.zero;
@@ -223,11 +365,10 @@ public class PlayerController : MonoBehaviour
         {
             if (anim != null) { anim.SetInteger(hashLightAttackIndex, lightComboIndex); anim.SetTrigger(hashLightAttack); }
             lightComboIndex++;
-
             if (lightComboIndex > 1) lightComboIndex = 0;
 
             yield return new WaitForSeconds(tempoAtaqueLeve * porcentagemHitLeve);
-            CausarDanoNoInimigo(danoAtaqueLeve);
+            CausarDanoMelee(danoAtaqueLeve);
             yield return new WaitForSeconds(tempoAtaqueLeve * (1f - porcentagemHitLeve));
         }
         else
@@ -237,18 +378,17 @@ public class PlayerController : MonoBehaviour
             if (heavyComboIndex > 1) heavyComboIndex = 0;
 
             yield return new WaitForSeconds(tempoAtaquePesado * porcentagemHitPesado);
-            CausarDanoNoInimigo(danoAtaquePesado);
+            CausarDanoMelee(danoAtaquePesado);
             yield return new WaitForSeconds(tempoAtaquePesado * (1f - porcentagemHitPesado));
         }
 
         isAttacking = false;
     }
 
-    private void CausarDanoNoInimigo(int dano)
+    private void CausarDanoMelee(int dano)
     {
-        if (pontoDeAtaque == null) return;
-        Collider[] inimigosAcertados = Physics.OverlapSphere(pontoDeAtaque.position, raioDoAtaque, layerInimigos);
-
+        if (pontoDeAtaqueMelee == null) return;
+        Collider[] inimigosAcertados = Physics.OverlapSphere(pontoDeAtaqueMelee.position, raioDoAtaque, layerInimigos);
         bool acertouAlguem = false;
 
         foreach (Collider inimigo in inimigosAcertados)
@@ -258,6 +398,13 @@ public class PlayerController : MonoBehaviour
             {
                 zumbi.ReceberDano(dano, transform.position);
                 acertouAlguem = true;
+
+                if (efeitoSanguePrefab != null)
+                {
+                    Vector3 pontoImpacto = inimigo.ClosestPoint(pontoDeAtaqueMelee.position);
+                    Vector3 direcaoSangue = (pontoImpacto - transform.position).normalized;
+                    Instantiate(efeitoSanguePrefab, pontoImpacto, Quaternion.LookRotation(direcaoSangue));
+                }
             }
         }
 
@@ -268,43 +415,22 @@ public class PlayerController : MonoBehaviour
         }
     }
 
-    private IEnumerator HitStop()
-    {
-        Time.timeScale = 0.1f;
-        yield return new WaitForSecondsRealtime(0.04f);
-        Time.timeScale = 1f;
-    }
+    private IEnumerator HitStop() { Time.timeScale = 0.1f; yield return new WaitForSecondsRealtime(0.04f); Time.timeScale = 1f; }
 
     private IEnumerator CameraShake()
     {
-        float tempoDecorrido = 0f;
-
-        while (tempoDecorrido < tempoCameraShake)
+        float tempo = 0f;
+        while (tempo < tempoCameraShake)
         {
-            float x = Random.Range(-1f, 1f) * forcaCameraShake;
-            float z = Random.Range(-1f, 1f) * forcaCameraShake;
-
-            cameraShakeOffset = new Vector3(x, 0, z);
-
-            tempoDecorrido += Time.unscaledDeltaTime;
+            cameraShakeOffset = new Vector3(Random.Range(-1f, 1f) * forcaCameraShake, 0, Random.Range(-1f, 1f) * forcaCameraShake);
+            tempo += Time.unscaledDeltaTime;
             yield return null;
         }
-
         cameraShakeOffset = Vector3.zero;
-    }
-
-    private bool isGrounded()
-    {
-        if (capsuleCollider == null) return false;
-        float baseDaCapsula = capsuleCollider.bounds.min.y;
-        Vector3 solaDoPe = new Vector3(capsuleCollider.bounds.center.x, baseDaCapsula, capsuleCollider.bounds.center.z);
-        Vector3 sensor = solaDoPe + (Vector3.up * 0.1f);
-        LayerMask camadasDeApoio = layerChao | layerObstaculo;
-        return Physics.CheckSphere(sensor, 0.3f, camadasDeApoio, QueryTriggerInteraction.Ignore);
     }
     #endregion
 
-    #region Movimentação e Rolamento
+    #region Movimentação, Câmera e Inputs Gerais
     private void ProcessarInputsDeEstado()
     {
         moveInput.x = Input.GetAxisRaw("Horizontal");
@@ -343,7 +469,6 @@ public class PlayerController : MonoBehaviour
     {
         if (estaEsquivando) return;
 
-        // 🚨 O Freio de Mão Absoluto durante os golpes
         if (isAttacking || isEquipping)
         {
             currentSpeed = 0f;
@@ -358,12 +483,13 @@ public class PlayerController : MonoBehaviour
         smoothedMoveInput = Vector3.MoveTowards(smoothedMoveInput, targetMoveInput, taxaFrenagemAtual * Time.deltaTime);
 
         float targetSpeed = walkSpeed;
-        if (isProne) targetSpeed = proneSpeed;
+
+        if (isAiming && !isCrouching && !isProne) targetSpeed = walkSpeed;
+        else if (isProne) targetSpeed = proneSpeed;
         else if (isCrouching) targetSpeed = crouchSpeed;
         else if (querCorrer) targetSpeed = sprintSpeed;
 
         currentSpeed = Mathf.MoveTowards(currentSpeed, targetSpeed, aceleracaoCorrida * Time.deltaTime);
-
         if (mudandoPostura) currentSpeed = Mathf.MoveTowards(currentSpeed, proneSpeed, 30f * Time.deltaTime);
     }
 
@@ -372,6 +498,7 @@ public class PlayerController : MonoBehaviour
         estaEsquivando = true;
         isCrouching = false;
         isProne = false;
+        isAiming = false;
 
         if (anim != null) anim.SetTrigger(hashRoll);
 
@@ -383,25 +510,14 @@ public class PlayerController : MonoBehaviour
         while (tempoDecorrido < tempoRolamento)
         {
             if (!isGrounded() && tempoDecorrido > 0.2f) break;
-
             smoothedMoveInput = direcaoRolamento;
             float progresso = tempoDecorrido / tempoRolamento;
-
-            if (progresso <= 0.4f)
-            {
-                currentSpeed = velocidadeRolamento;
-            }
-            else
-            {
-                float progressoFrenagem = (progresso - 0.4f) / 0.6f;
-                float velocidadeFinal = querCorrer ? sprintSpeed : walkSpeed;
-                currentSpeed = Mathf.Lerp(velocidadeRolamento, velocidadeFinal, progressoFrenagem);
-            }
+            if (progresso <= 0.4f) currentSpeed = velocidadeRolamento;
+            else currentSpeed = Mathf.Lerp(velocidadeRolamento, querCorrer ? sprintSpeed : walkSpeed, (progresso - 0.4f) / 0.6f);
 
             tempoDecorrido += Time.deltaTime;
             yield return null;
         }
-
         currentSpeed = querCorrer ? sprintSpeed : walkSpeed;
         estaEsquivando = false;
     }
@@ -437,24 +553,16 @@ public class PlayerController : MonoBehaviour
     {
         if (anim == null) return;
 
-        visualCorrida = (querCorrer || (currentSpeed > walkSpeed + 0.5f && smoothedMoveInput.magnitude > 0.05f)) && !isCrouching && !isProne && !isAttacking && !isEquipping;
+        visualCorrida = (querCorrer || (currentSpeed > walkSpeed + 0.5f && smoothedMoveInput.magnitude > 0.05f)) && !isCrouching && !isProne && !isAttacking && !isEquipping && !isAiming;
 
         anim.SetBool(hashIsCrouching, isCrouching);
         anim.SetBool(hashIsProne, isProne);
         anim.SetBool(hashIsSprinting, visualCorrida);
         anim.SetBool(hashIsArmed, isArmed);
+        anim.SetBool(hashIsAiming, isAiming);
 
-        if (!isGrounded())
-        {
-            tempoNoAr += Time.deltaTime;
-        }
-        else
-        {
-            tempoNoAr = 0f;
-        }
-
-        bool deveCair = (tempoNoAr > 0.30f) && !isProne && !estaEsquivando && !mudandoPostura && Time.time > tempoBloqueioQueda;
-        anim.SetBool(hashIsFalling, deveCair);
+        tempoNoAr = !isGrounded() ? tempoNoAr + Time.deltaTime : 0f;
+        anim.SetBool(hashIsFalling, (tempoNoAr > 0.30f) && !isProne && !estaEsquivando && !mudandoPostura && Time.time > tempoBloqueioQueda);
 
         Vector3 localMove = transform.InverseTransformDirection(smoothedMoveInput);
         float alvoMultiplicador = visualCorrida ? 2f : 1f;
@@ -463,7 +571,7 @@ public class PlayerController : MonoBehaviour
         float finalX = localMove.x * currentAnimMultiplier;
         float finalZ = localMove.z * currentAnimMultiplier;
 
-        if (isProne) { finalZ = moveInput.magnitude > 0.01f ? smoothedMoveInput.magnitude * currentAnimMultiplier : 0f; finalX = 0f; }
+        // A limitação de eixo em 'isProne' foi completamente removida daqui para ele engatinhar para trás na mesma hora.
 
         anim.SetFloat(hashVelocityX, finalX, 0.05f, Time.deltaTime);
         anim.SetFloat(hashVelocityZ, finalZ, 0.05f, Time.deltaTime);
@@ -486,12 +594,7 @@ public class PlayerController : MonoBehaviour
     private void InicializarCamera()
     {
         if (playerCamera == null) playerCamera = Camera.main;
-        if (playerCamera != null)
-        {
-            distanciaAtual = offsetCamera.magnitude;
-            distanciaAlvo = distanciaAtual;
-            direcaoOriginalDaCamera = offsetCamera.normalized;
-        }
+        if (playerCamera != null) { distanciaAtual = offsetCamera.magnitude; distanciaAlvo = distanciaAtual; direcaoOriginalDaCamera = offsetCamera.normalized; }
     }
 
     private void HandleZoomInput()
@@ -500,34 +603,25 @@ public class PlayerController : MonoBehaviour
         if (usarScrollDoMouse) inputDeZoom = Input.GetAxis("Mouse ScrollWheel") * -1f * sensibilidadeZoom * 10f;
         if (Input.GetKey(botaoZoomIn)) inputDeZoom = -sensibilidadeZoom * Time.deltaTime;
         else if (Input.GetKey(botaoZoomOut)) inputDeZoom = sensibilidadeZoom * Time.deltaTime;
-        if (inputDeZoom != 0)
-        {
-            distanciaAlvo += inputDeZoom;
-            distanciaAlvo = Mathf.Clamp(distanciaAlvo, distanciaMinima, distanciaMaxima);
-        }
+        if (inputDeZoom != 0) { distanciaAlvo += inputDeZoom; distanciaAlvo = Mathf.Clamp(distanciaAlvo, distanciaMinima, distanciaMaxima); }
     }
 
     private void AplicarZoomECameraFollow()
     {
         distanciaAtual = Mathf.Lerp(distanciaAtual, distanciaAlvo, suavidadeZoom * Time.deltaTime);
-
         Vector3 novaPosicaoCamera = transform.position + (direcaoOriginalDaCamera * distanciaAtual) + cameraShakeOffset;
-
         playerCamera.transform.position = novaPosicaoCamera;
-
         playerCamera.transform.LookAt(transform.position + Vector3.up * (alturaEmPe / 2f));
     }
 
     private void RedimensionarColisorDoPlayer()
     {
         if (capsuleCollider == null) return;
-
         float alturaAlvo = alturaEmPe;
         if (isProne) alturaAlvo = alturaDeitado;
         else if (isCrouching) alturaAlvo = alturaAgachado;
 
         mudandoPostura = Mathf.Abs(capsuleCollider.height - alturaAlvo) > 0.05f;
-
         capsuleCollider.height = Mathf.Lerp(capsuleCollider.height, alturaAlvo, 15f * Time.deltaTime);
         float diferencaAltura = alturaEmPe - capsuleCollider.height;
         Vector3 novoCentro = capsuleCollider.center;
@@ -537,10 +631,16 @@ public class PlayerController : MonoBehaviour
 
     void OnDrawGizmosSelected()
     {
-        if (pontoDeAtaque == null) return;
-
+        if (pontoDeAtaqueMelee == null) return;
         Gizmos.color = Color.red;
-        Gizmos.DrawWireSphere(pontoDeAtaque.position, raioDoAtaque);
+        Gizmos.DrawWireSphere(pontoDeAtaqueMelee.position, raioDoAtaque);
+    }
+    private bool isGrounded()
+    {
+        if (capsuleCollider == null) return false;
+        float baseDaCapsula = capsuleCollider.bounds.min.y;
+        Vector3 sensor = new Vector3(capsuleCollider.bounds.center.x, baseDaCapsula, capsuleCollider.bounds.center.z) + (Vector3.up * 0.1f);
+        return Physics.CheckSphere(sensor, 0.3f, layerChao | layerObstaculo, QueryTriggerInteraction.Ignore);
     }
     #endregion
 }
